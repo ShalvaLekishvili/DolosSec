@@ -157,7 +157,7 @@ Clone the repository and create an environment:
 ### Linux / macOS
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/dolossec-agent.git
+git clone https://github.com/ShalvaLekishvili/DolosSec.git
 cd dolossec-agent
 
 python3 -m venv .venv
@@ -168,7 +168,7 @@ pip install -e '.[ai,dev]'
 ### Windows PowerShell
 
 ```powershell
-git clone https://github.com/YOUR-USERNAME/dolossec-agent.git
+git clone https://github.com/ShalvaLekishvili/DolosSec.git
 cd dolossec-agent
 
 py -3.12 -m venv .venv
