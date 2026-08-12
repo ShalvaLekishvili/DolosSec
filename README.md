@@ -1,4 +1,8 @@
+<p align="center">
+  <img src="assets/dolossec-banner.png" alt="DolosSec — AI-Assisted Security Research Console" width="100%">
+</p>
 # DolosSec Agent
+
 
 **DolosSec** is a clean-room, policy-gated autonomous application-security research framework with a local web control plane. The core trust rule is:
 
