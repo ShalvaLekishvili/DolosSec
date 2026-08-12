@@ -1,0 +1,22 @@
+authorization:
+  owner: "security-team@example.com"
+  ticket: "APPSEC-0001"
+  purpose: "Authorized staging security assessment"
+  expires_at: "2026-12-31T23:59:59Z"
+
+scope:
+  urls:
+    - "https://staging.example.com"
+  hosts:
+    - "staging.example.com"
+  cidrs: []
+  local_paths:
+    - "./sample-app"
+
+policy:
+  allowed_http_methods: ["GET", "HEAD", "OPTIONS"]
+  max_redirects: 3
+  max_response_bytes: 524288
+  request_timeout_seconds: 10
+  requests_per_second: 2.0
+  allow_private_networks: false
