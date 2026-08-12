@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import platform
+import shutil
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -12,11 +15,13 @@ from rich.table import Table
 
 from .agents.orchestrator import Orchestrator
 from .config import settings
-from .llm.deterministic import DeterministicPlanner
+from .llm.factory import create_planner
 from .models import Authorization, PolicySpec, ScopeManifest, ScopeSpec, Target, TargetKind
 from .policy import PolicyViolation, ScopePolicy, load_manifest
 
 app = typer.Typer(help="DolosSec policy-gated autonomous application security agent")
+ollama_app = typer.Typer(help="Inspect and configure the local Ollama AI backend")
+app.add_typer(ollama_app, name="ollama")
 console = Console()
 
 
@@ -39,12 +44,6 @@ def make_local_manifest(path: Path) -> ScopeManifest:
         policy=PolicySpec(),
     )
 
-
-def get_planner():
-    if settings.llm_provider.lower() == "openai":
-        from .llm.openai_provider import OpenAIPlanner
-        return OpenAIPlanner(settings.model)
-    return DeterministicPlanner()
 
 
 @app.command()
@@ -74,6 +73,8 @@ def doctor() -> None:
     table.add_row("Planner", settings.llm_provider)
     table.add_row("Model", settings.model or "<not configured>")
     table.add_row("Max steps", str(settings.max_steps))
+    table.add_row("Ollama endpoint", settings.ollama_base_url)
+    table.add_row("Remote Ollama allowed", str(settings.ollama_allow_remote))
     table.add_row("Output directory", str(settings.output_dir))
     console.print(table)
 
@@ -110,11 +111,102 @@ def scan(
         console.print(f"[red]Policy error:[/red] {exc}")
         raise typer.Exit(2)
 
-    planner = get_planner()
+    planner = create_planner()
     record = asyncio.run(Orchestrator(target, planner, policy, mode, scope_file).run())
     console.print(f"[bold green]Completed[/bold green] run {record.run_id}")
     console.print(f"Findings: {record.findings_count}")
     console.print(f"Report: {record.output_dir / 'report.md'}")
+
+
+@ollama_app.command("status")
+def ollama_status_cmd() -> None:
+    """Check the local Ollama service and list installed models."""
+    from .llm.ollama_provider import ollama_status
+
+    status = asyncio.run(ollama_status())
+    table = Table(title="DolosSec · Ollama")
+    table.add_column("Setting")
+    table.add_column("Value")
+    table.add_row("Reachable", "yes" if status["reachable"] else "no")
+    table.add_row("Base URL", str(status["base_url"]))
+    table.add_row("Version", str(status.get("version") or "—"))
+    table.add_row("Configured model", settings.model or "<not configured>")
+    table.add_row("Installed models", str(len(status.get("models", []))))
+    if status.get("error"):
+        table.add_row("Error", str(status["error"]))
+    console.print(table)
+    if status.get("models"):
+        models = Table(title="Local models")
+        models.add_column("Model")
+        models.add_column("Parameters")
+        models.add_column("Quantization")
+        for item in status["models"]:
+            models.add_row(
+                str(item.get("name") or "—"),
+                str(item.get("parameter_size") or "—"),
+                str(item.get("quantization_level") or "—"),
+            )
+        console.print(models)
+    if not status["reachable"]:
+        raise typer.Exit(1)
+
+
+@ollama_app.command("pull")
+def ollama_pull_cmd(model: str = typer.Argument("qwen3.5:9b")) -> None:
+    """Download a local model using the installed Ollama CLI."""
+    binary = shutil.which("ollama")
+    if not binary:
+        console.print("[red]Ollama CLI not found.[/red] Run `dolos ollama install-guide` first.")
+        raise typer.Exit(1)
+    console.print(f"[cyan]Pulling[/cyan] {model} using {binary}")
+    result = subprocess.run([binary, "pull", model], check=False)
+    if result.returncode:
+        raise typer.Exit(result.returncode)
+
+
+@ollama_app.command("test")
+def ollama_test_cmd(model: str | None = typer.Option(None, "--model")) -> None:
+    """Ask the configured local model for one typed DolosSec planning turn without executing tools."""
+    from .llm.ollama_provider import OllamaPlanner
+
+    selected = model or settings.model or "qwen3.5:9b"
+    planner = OllamaPlanner(selected)
+    target = Target(kind=TargetKind.local_path, value="/authorized/example")
+    try:
+        turn = asyncio.run(planner.next_turn(target, [], 0))
+    except Exception as exc:
+        console.print(f"[red]Ollama test failed:[/red] {exc}")
+        raise typer.Exit(1)
+    console.print(f"[green]Model responded:[/green] {selected}")
+    console.print_json(turn.model_dump_json(indent=2))
+
+
+@ollama_app.command("install-guide")
+def ollama_install_guide() -> None:
+    """Print concise official installation steps for this operating system."""
+    system = platform.system().lower()
+    if system == "linux":
+        console.print("[bold]Linux / Kali / Debian / Ubuntu[/bold]")
+        console.print("1. curl -fsSL https://ollama.com/install.sh | sh")
+        console.print("2. ollama --version")
+        console.print("3. ollama pull qwen3.5:9b")
+    elif system == "darwin":
+        console.print("[bold]macOS[/bold]")
+        console.print("1. Install Ollama.app from the official Ollama download page and launch it once.")
+        console.print("2. ollama --version")
+        console.print("3. ollama pull qwen3.5:9b")
+    elif system == "windows":
+        console.print("[bold]Windows[/bold]")
+        console.print("1. Install OllamaSetup.exe from the official Ollama download page.")
+        console.print("2. Open a new PowerShell window and run: ollama --version")
+        console.print("3. ollama pull qwen3.5:9b")
+    else:
+        console.print("See docs/OLLAMA.md for installation and configuration.")
+    console.print("\nThen configure DolosSec in .env:")
+    console.print("DOLOS_LLM_PROVIDER=ollama")
+    console.print("DOLOS_MODEL=qwen3.5:9b")
+    console.print("DOLOS_OLLAMA_BASE_URL=http://127.0.0.1:11434")
+    console.print("\nVerify with: dolos ollama status && dolos ollama test")
 
 
 @app.command()

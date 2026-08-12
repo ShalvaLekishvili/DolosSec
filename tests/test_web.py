@@ -62,3 +62,48 @@ def test_non_local_browser_origin_is_denied(tmp_path: Path):
             json={"target_type": "local_path", "target": str(tmp_path), "mode": "quick"},
         )
         assert response.status_code == 403
+
+
+def test_deep_scan_requires_explicit_approval(tmp_path: Path):
+    target = tmp_path / "deep-sample"
+    target.mkdir()
+    (target / "app.py").write_text('debug = True\n', encoding="utf-8")
+
+    app = create_app()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/runs",
+            json={"target_type": "local_path", "target": str(target), "mode": "deep"},
+        )
+        assert response.status_code == 202
+        payload = response.json()
+        assert payload["status"] == "awaiting_approval"
+        assert payload["approval_required"] is True
+        run_id = payload["run_id"]
+
+        approved = client.post(f"/api/runs/{run_id}/approve", json={"analyst": "test-analyst"})
+        assert approved.status_code == 200
+        assert approved.json()["approved_by"] == "test-analyst"
+
+        final = None
+        for _ in range(80):
+            final = client.get(f"/api/runs/{run_id}").json()
+            if final["status"] in {"completed", "failed"}:
+                break
+            time.sleep(0.05)
+        assert final is not None
+        assert final["status"] == "completed"
+        assert final["approved_by"] == "test-analyst"
+
+
+def test_history_and_capabilities_endpoints():
+    app = create_app()
+    with TestClient(app) as client:
+        history = client.get("/api/runs")
+        assert history.status_code == 200
+        assert isinstance(history.json()["runs"], list)
+        capabilities = client.get("/api/capabilities")
+        assert capabilities.status_code == 200
+        ids = {x["id"] for x in capabilities.json()["adapters"]}
+        assert {"bandit_scan", "semgrep_scan", "trivy_fs_scan", "nuclei"}.issubset(ids)
+        assert capabilities.json()["deep_requires_approval"] is True

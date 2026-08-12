@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
-
 from ..audit import AuditLog
 from ..models import Action, Observation
 from ..policy import ScopePolicy
 from .base import Tool
+from .external import BanditTool, SemgrepTool, TrivyFsTool
 from .http import HttpProbeTool, SecurityHeadersTool
 from .source import SourceMapTool, SourceReviewTool
 
@@ -17,6 +16,9 @@ class ToolBroker:
         self.tools: dict[str, Tool] = {
             "source_map": SourceMapTool(policy),
             "source_review": SourceReviewTool(policy),
+            "bandit_scan": BanditTool(policy),
+            "semgrep_scan": SemgrepTool(policy),
+            "trivy_fs_scan": TrivyFsTool(policy),
         }
         if policy:
             self.tools["http_probe"] = HttpProbeTool(policy)

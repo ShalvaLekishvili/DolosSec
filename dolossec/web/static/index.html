@@ -1,151 +1,103 @@
 <!doctype html>
-<html lang="en">
+<html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>DolosSec — Security Research Workspace</title>
+  <title>DolosSec v0.4</title>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <div class="shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">D</div>
-        <div><strong>DolosSec</strong><span>Security Research Agent</span></div>
+<div class="shell">
+  <aside>
+    <div class="brand">DolosSec <span>v0.4</span></div>
+    <button data-go="scan">Scan Center</button>
+    <button data-go="history">History</button>
+    <button data-go="live">Live Agents</button>
+    <button data-go="findings">Findings</button>
+    <div class="foot" id="engine">Engine…</div>
+  </aside>
+  <main>
+    <header>
+      <div><small>AUTHORIZED SECURITY RESEARCH</small><h1>Security Research Console</h1></div>
+      <div id="planner" class="pill">Planner…</div>
+    </header>
+
+    <section id="scan" class="grid">
+      <div class="card">
+        <h2>New assessment</h2>
+        <div class="tabs">
+          <button class="tab active" data-type="local_path">Local directory</button>
+          <button class="tab" data-type="url">Web URL</button>
+        </div>
+        <form id="scan-form">
+          <input id="target-type" type="hidden" value="local_path">
+          <div id="local-wrap">
+            <label>Directory</label>
+            <div class="row"><input id="local-path" placeholder="/Users/you/project"><button type="button" id="browse">Browse</button></div>
+          </div>
+          <div id="url-wrap" class="hidden">
+            <label>Authorized URL</label>
+            <input id="target-url" type="url" placeholder="https://staging.example.com">
+            <div class="twocol"><input id="auth-owner" placeholder="Owner / operator"><input id="auth-ticket" placeholder="Ticket / reference"></div>
+            <input id="auth-purpose" placeholder="Assessment purpose">
+            <label class="check"><input id="allow-private" type="checkbox"> Allow authorized private/loopback target</label>
+          </div>
+
+          <label>Mode</label>
+          <select id="mode"><option>quick</option><option selected>standard</option><option>deep</option></select>
+
+          <div class="ai-config">
+            <label>AI planner</label>
+            <select id="planner-provider">
+              <option value="default">Project default</option>
+              <option value="ollama">Ollama · local/free</option>
+              <option value="deterministic">Deterministic · no AI</option>
+              <option value="openai">OpenAI · configured API</option>
+            </select>
+            <label>Model</label>
+            <select id="ai-model"><option value="">Use configured model</option></select>
+            <div id="ai-hint" class="hint">Checking local Ollama…</div>
+          </div>
+
+          <div id="adapter-wrap"><label>Source adapters</label><div id="adapters" class="adapter-list"></div></div>
+          <div id="form-error" class="error hidden"></div>
+          <button class="primary" type="submit">Start assessment</button>
+        </form>
       </div>
-      <nav>
-        <button class="nav-item active">Scan Center</button>
-        <button class="nav-item" data-scroll="live-panel">Live Run</button>
-        <button class="nav-item" data-scroll="findings-panel">Findings</button>
-        <button class="nav-item" data-scroll="report-panel">Report</button>
-      </nav>
-      <div class="sidebar-footer">
-        <div class="status-dot"></div>
-        <div><strong id="engine-status">Engine online</strong><span id="engine-detail">Local control plane</span></div>
+
+      <div>
+        <div class="card">
+          <div class="head"><h2>Local AI engine</h2><span id="ollama-badge" class="pill">Checking…</span></div>
+          <div class="policy">
+            <b>Ollama endpoint</b><p id="ollama-endpoint">http://127.0.0.1:11434</p>
+            <b>Installed models</b><p id="ollama-models">Checking…</p>
+            <b>Recommended</b><p><code>qwen3.5:9b</code> balanced · <code>qwen3.5:4b</code> lightweight</p>
+            <b>No cloud key required</b><p>DolosSec talks directly to the local Ollama REST API. Remote Ollama hosts are blocked by default.</p>
+          </div>
+        </div>
+        <div class="card">
+          <h2>Execution policy</h2>
+          <div class="policy">
+            <b>Scope below the LLM</b><p>All target and path checks are enforced by host code.</p>
+            <b>Human gate for deep mode</b><p>Deep scans do not execute until an analyst approves them.</p>
+            <b>Fixed adapter argv</b><p>Optional source scanners never receive arbitrary shell strings from the model.</p>
+            <b>Evidence first</b><p>Findings stay linked to tool output and audit events.</p>
+          </div>
+        </div>
       </div>
-    </aside>
+    </section>
 
-    <main>
-      <header class="topbar">
-        <div>
-          <div class="eyebrow">AUTHORIZED SECURITY RESEARCH</div>
-          <h1>Security Research Workspace</h1>
-        </div>
-        <div class="top-meta"><span class="pill">Policy-gated</span><span class="pill" id="planner-pill">Planner: …</span></div>
-      </header>
-
-      <section class="grid two-col">
-        <div class="card scan-card">
-          <div class="card-head">
-            <div><span class="step-kicker">01 / TARGET</span><h2>Choose assessment target</h2></div>
-            <span class="quiet">Local source or authorized URL</span>
-          </div>
-
-          <div class="target-tabs" role="tablist">
-            <button class="target-tab active" data-target-type="local_path">Local directory</button>
-            <button class="target-tab" data-target-type="url">Web URL</button>
-          </div>
-
-          <form id="scan-form">
-            <input type="hidden" id="target-type" value="local_path">
-            <div class="field" id="local-target-field">
-              <label for="local-path">Directory path</label>
-              <div class="input-action">
-                <input id="local-path" autocomplete="off" placeholder="/Users/you/projects/application">
-                <button type="button" class="secondary" id="browse-button">Browse</button>
-              </div>
-              <small>Directories are analyzed locally. The agent does not upload your source tree.</small>
-            </div>
-
-            <div class="field hidden" id="url-target-field">
-              <label for="target-url">Target URL</label>
-              <input id="target-url" type="url" placeholder="https://staging.example.com">
-              <small>The host is placed into an explicit scan scope before network tools are allowed to run.</small>
-            </div>
-
-            <div id="authorization-fields" class="hidden authorization-box">
-              <div class="auth-head"><span class="step-kicker">02 / AUTHORIZATION</span><strong>Remote target authorization</strong></div>
-              <div class="form-grid">
-                <div class="field"><label for="auth-owner">Owner / operator</label><input id="auth-owner" placeholder="security-team@example.com"></div>
-                <div class="field"><label for="auth-ticket">Ticket / reference</label><input id="auth-ticket" placeholder="APPSEC-0001"></div>
-              </div>
-              <div class="field"><label for="auth-purpose">Purpose</label><input id="auth-purpose" placeholder="Authorized staging security assessment"></div>
-              <div class="form-grid compact">
-                <div class="field"><label for="auth-expiry">Authorization lifetime</label><select id="auth-expiry"><option value="8">8 hours</option><option value="24" selected>24 hours</option><option value="72">72 hours</option><option value="168">7 days</option></select></div>
-                <label class="check-row"><input id="allow-private" type="checkbox"><span><strong>Private / loopback target</strong><small>Enable only for an authorized internal lab or local service.</small></span></label>
-              </div>
-            </div>
-
-            <div class="mode-block">
-              <span class="step-kicker">03 / DEPTH</span>
-              <div class="mode-grid">
-                <label class="mode-option"><input type="radio" name="mode" value="quick"><span><strong>Quick</strong><small>Fast baseline</small></span></label>
-                <label class="mode-option selected"><input type="radio" name="mode" value="standard" checked><span><strong>Standard</strong><small>Balanced review</small></span></label>
-                <label class="mode-option"><input type="radio" name="mode" value="deep"><span><strong>Deep</strong><small>Extended agent loop</small></span></label>
-              </div>
-            </div>
-
-            <div id="form-error" class="error-banner hidden"></div>
-            <button class="primary launch" type="submit"><span>Start assessment</span><span>→</span></button>
-          </form>
-        </div>
-
-        <div class="card posture-card">
-          <div class="card-head"><div><span class="step-kicker">EXECUTION MODEL</span><h2>Guardrails before autonomy</h2></div></div>
-          <div class="guardrail-list">
-            <div class="guardrail"><span>01</span><div><strong>Scope validation</strong><p>Target authorization is checked before the planner receives execution control.</p></div></div>
-            <div class="guardrail"><span>02</span><div><strong>Typed actions</strong><p>The planner proposes bounded tool calls rather than receiving an unrestricted shell.</p></div></div>
-            <div class="guardrail"><span>03</span><div><strong>Evidence trail</strong><p>Planner decisions, tool execution and findings are written into a hash-linked audit record.</p></div></div>
-            <div class="guardrail"><span>04</span><div><strong>Live reporting</strong><p>Observations become findings while the scan is still running, not only after completion.</p></div></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="card live-card" id="live-panel">
-        <div class="card-head">
-          <div><span class="step-kicker">LIVE EXECUTION</span><h2>Assessment timeline</h2></div>
-          <div class="run-state"><span class="pulse idle" id="run-pulse"></span><strong id="run-status">No active run</strong></div>
-        </div>
-        <div class="metrics">
-          <div><span>RUN ID</span><strong id="metric-run-id">—</strong></div>
-          <div><span>TARGET</span><strong id="metric-target">—</strong></div>
-          <div><span>MODE</span><strong id="metric-mode">—</strong></div>
-          <div><span>FINDINGS</span><strong id="metric-findings">0</strong></div>
-        </div>
-        <div class="timeline" id="timeline"><div class="empty-state">Start an assessment to stream planner and tool activity here.</div></div>
-      </section>
-
-      <section class="card" id="findings-panel">
-        <div class="card-head">
-          <div><span class="step-kicker">LIVE FINDINGS</span><h2>Evidence-backed observations</h2></div>
-          <span class="quiet" id="finding-summary">0 findings</span>
-        </div>
-        <div id="findings" class="findings"><div class="empty-state">Findings will appear as evidence is produced.</div></div>
-      </section>
-
-      <section class="card" id="report-panel">
-        <div class="card-head">
-          <div><span class="step-kicker">FINAL OUTPUT</span><h2>Assessment report</h2></div>
-          <div class="artifact-actions hidden" id="artifact-actions">
-            <a id="download-report" class="secondary link-button">Report</a>
-            <a id="download-findings" class="secondary link-button">JSON</a>
-            <a id="download-audit" class="secondary link-button">Audit</a>
-          </div>
-        </div>
-        <pre id="report-view" class="report-view">The final Markdown report will be rendered here when the assessment completes.</pre>
-      </section>
-    </main>
-  </div>
-
-  <div class="modal hidden" id="browser-modal" role="dialog" aria-modal="true">
-    <div class="modal-card">
-      <div class="card-head"><div><span class="step-kicker">LOCAL FILESYSTEM</span><h2>Choose a directory</h2></div><button class="icon-button" id="close-browser">×</button></div>
-      <div class="browser-path" id="browser-path">—</div>
-      <div class="browser-list" id="browser-list"></div>
-      <div class="modal-actions"><button class="secondary" id="browser-parent">Parent</button><button class="primary" id="select-folder">Use this folder</button></div>
-    </div>
-  </div>
-
-  <script src="/static/app.js"></script>
+    <section id="history" class="card"><div class="head"><h2>Scan history</h2><button id="refresh-history">Refresh</button></div><div id="history-list" class="history"></div></section>
+    <section id="live" class="card">
+      <div class="head"><h2>Live agent execution</h2><div><span id="status" class="pill">No run</span> <button id="approve" class="primary hidden">Approve deep scan</button></div></div>
+      <div class="metrics"><div>RUN <b id="run-id">—</b></div><div>TARGET <b id="run-target">—</b></div><div>MODE <b id="run-mode">—</b></div><div>AI <b id="run-ai">—</b></div><div>FINDINGS <b id="run-count">0</b></div></div>
+      <div id="severity" class="severity-grid"></div><div id="agents" class="agents"></div><div id="timeline" class="timeline"><div class="empty">Start or select a run.</div></div>
+    </section>
+    <section id="findings" class="card"><div class="head"><h2>Evidence-backed findings</h2><span id="finding-total">0 findings</span></div><div id="finding-list"></div></section>
+    <section class="card"><div class="head"><h2>Report</h2><div id="downloads" class="hidden"><a id="dl-report">Report</a><a id="dl-json">Findings</a><a id="dl-audit">Audit</a><a id="dl-obs">Evidence</a></div></div><pre id="report">No completed report selected.</pre></section>
+  </main>
+</div>
+<div id="modal" class="modal hidden"><div class="modal-card"><div class="head"><h2>Choose directory</h2><button id="close">×</button></div><code id="browser-path"></code><div id="browser-list"></div><div class="row"><button id="parent">Parent</button><button id="choose" class="primary">Use folder</button></div></div></div>
+<script src="/static/app.js"></script>
 </body>
 </html>

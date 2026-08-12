@@ -5,7 +5,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class Severity(str, Enum):
@@ -60,14 +60,20 @@ class Target(BaseModel):
     value: str
 
 
+ToolName = Literal[
+    "http_probe",
+    "security_headers",
+    "source_map",
+    "source_review",
+    "bandit_scan",
+    "semgrep_scan",
+    "trivy_fs_scan",
+    "finish",
+]
+
+
 class Action(BaseModel):
-    tool: Literal[
-        "http_probe",
-        "security_headers",
-        "source_map",
-        "source_review",
-        "finish",
-    ]
+    tool: ToolName
     arguments: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
 
@@ -95,7 +101,10 @@ class Finding(BaseModel):
     evidence: list[str] = Field(default_factory=list)
     remediation: str
     cwe: str | None = None
+    cvss_score: float | None = Field(default=None, ge=0, le=10)
+    cvss_vector: str | None = None
     references: list[str] = Field(default_factory=list)
+    source_tool: str | None = None
 
 
 class RunRecord(BaseModel):
@@ -106,5 +115,10 @@ class RunRecord(BaseModel):
     scope_file: str | None = None
     mode: str
     planner: str
+    planner_model: str | None = None
     findings_count: int = 0
     output_dir: Path
+    enabled_adapters: list[str] = Field(default_factory=list)
+    approval_required: bool = False
+    approved_by: str | None = None
+    approved_at: datetime | None = None

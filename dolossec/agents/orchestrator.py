@@ -3,7 +3,6 @@ from __future__ import annotations
 import inspect
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -18,6 +17,16 @@ from ..tooling.registry import ToolBroker
 ProgressSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 
+def _agent_for_tool(tool: str) -> str:
+    if tool in {"source_map", "source_review", "bandit_scan", "semgrep_scan", "trivy_fs_scan"}:
+        return "source-researcher"
+    if tool in {"http_probe", "security_headers"}:
+        return "web-researcher"
+    if tool == "finish":
+        return "orchestrator"
+    return "tool-broker"
+
+
 class Orchestrator:
     def __init__(
         self,
@@ -27,6 +36,12 @@ class Orchestrator:
         mode: str,
         scope_file: str | None,
         progress_sink: ProgressSink | None = None,
+        *,
+        enabled_adapters: list[str] | None = None,
+        approval_required: bool = False,
+        approved_by: str | None = None,
+        approved_at: datetime | None = None,
+        run_id: str | None = None,
     ):
         self.target = target
         self.planner = planner
@@ -34,7 +49,11 @@ class Orchestrator:
         self.mode = mode
         self.scope_file = scope_file
         self.progress_sink = progress_sink
-        self.run_id = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:6]
+        self.enabled_adapters = enabled_adapters or []
+        self.approval_required = approval_required
+        self.approved_by = approved_by
+        self.approved_at = approved_at
+        self.run_id = run_id or (datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid4().hex[:6])
         self.output_dir = settings.output_dir / self.run_id
         self.audit = AuditLog(self.output_dir / "audit.jsonl")
         self.broker = ToolBroker(policy, self.audit)
@@ -61,18 +80,26 @@ class Orchestrator:
             scope_file=self.scope_file,
             mode=self.mode,
             planner=self.planner.name,
+            planner_model=getattr(self.planner, "model", None),
             output_dir=self.output_dir,
+            enabled_adapters=self.enabled_adapters,
+            approval_required=self.approval_required,
+            approved_by=self.approved_by,
+            approved_at=self.approved_at,
         )
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.audit.append("run_started", record.model_dump())
         await self._emit(
             "run_started",
-            "Scan initialized",
+            "Assessment initialized",
             {
                 "run_id": self.run_id,
                 "target": self.target.model_dump(mode="json"),
                 "mode": self.mode,
                 "planner": self.planner.name,
+                "planner_model": getattr(self.planner, "model", None),
+                "agent": "orchestrator",
+                "enabled_adapters": self.enabled_adapters,
             },
         )
 
@@ -87,7 +114,7 @@ class Orchestrator:
             await self._emit(
                 "planning",
                 f"Planning step {step + 1}",
-                {"step": step + 1, "max_steps": max_steps},
+                {"step": step + 1, "max_steps": max_steps, "agent": "planner"},
             )
             turn = await self.planner.next_turn(self.target, observations, step)
             self.audit.append("planner_turn", turn.model_dump())
@@ -98,6 +125,7 @@ class Orchestrator:
                     "step": step + 1,
                     "summary": turn.summary,
                     "actions": [a.model_dump(mode="json") for a in turn.actions],
+                    "agent": "planner",
                 },
             )
             if not turn.actions:
@@ -105,6 +133,7 @@ class Orchestrator:
 
             should_finish = False
             for action in turn.actions:
+                agent = _agent_for_tool(action.tool)
                 await self._emit(
                     "tool_started",
                     f"Running {action.tool}",
@@ -112,6 +141,7 @@ class Orchestrator:
                         "tool": action.tool,
                         "reason": action.reason,
                         "arguments": action.arguments,
+                        "agent": agent,
                     },
                 )
                 obs = await self.broker.execute(action)
@@ -124,6 +154,7 @@ class Orchestrator:
                         "ok": obs.ok,
                         "error": obs.error,
                         "data": obs.data,
+                        "agent": agent,
                     },
                 )
 
@@ -134,6 +165,7 @@ class Orchestrator:
                     {
                         "count": len(partial_findings),
                         "findings": [f.model_dump(mode="json") for f in partial_findings],
+                        "agent": "reporter",
                     },
                 )
 
@@ -143,7 +175,33 @@ class Orchestrator:
             if should_finish:
                 break
 
-        await self._emit("reporting", "Building assessment report")
+        # External source adapters are a host-controlled phase, not LLM-selected commands.
+        # This preserves deterministic scope/argv controls even when an AI planner is enabled.
+        if self.target.kind.value == "local_path" and self.enabled_adapters:
+            for tool_name in self.enabled_adapters:
+                if any(o.tool == tool_name for o in observations):
+                    continue
+                await self._emit(
+                    "tool_started",
+                    f"Running approved adapter {tool_name}",
+                    {"tool": tool_name, "reason": "Operator-selected adapter", "arguments": {"path": self.target.value}, "agent": "source-researcher"},
+                )
+                from ..models import Action
+                obs = await self.broker.execute(Action(tool=tool_name, arguments={"path": self.target.value}, reason="Operator-selected adapter"))
+                observations.append(obs)
+                await self._emit(
+                    "tool_completed" if obs.ok else "tool_failed",
+                    f"{tool_name} {'completed' if obs.ok else 'failed'}",
+                    {"tool": tool_name, "ok": obs.ok, "error": obs.error, "data": obs.data, "agent": "source-researcher"},
+                )
+                partial_findings = findings_from_observations(observations, self.target.value)
+                await self._emit(
+                    "findings_updated",
+                    f"{len(partial_findings)} finding(s) identified so far",
+                    {"count": len(partial_findings), "findings": [f.model_dump(mode="json") for f in partial_findings], "agent": "reporter"},
+                )
+
+        await self._emit("reporting", "Building assessment report", {"agent": "reporter"})
         findings = findings_from_observations(observations, self.target.value)
         write_reports(self.output_dir, findings, observations)
         record.findings_count = len(findings)
@@ -160,6 +218,7 @@ class Orchestrator:
                 "run_id": self.run_id,
                 "findings_count": len(findings),
                 "output_dir": str(self.output_dir),
+                "agent": "orchestrator",
             },
         )
         return record
