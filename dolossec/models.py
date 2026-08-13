@@ -63,6 +63,7 @@ class Target(BaseModel):
 ToolName = Literal[
     "http_probe",
     "security_headers",
+    "web_inventory",
     "source_map",
     "source_review",
     "bandit_scan",

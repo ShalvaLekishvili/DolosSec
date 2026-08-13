@@ -73,6 +73,15 @@ function agents(events=[]) {
   events.forEach(e=>{const a=e.data?.agent;if(a)last[a]=e});
   $('agents').innerHTML=names.map(n=>`<div class="agent ${last[n]?'active':''}"><b>${n}</b><br>${esc(last[n]?.message||'idle')}</div>`).join('');
 }
+function surface(data={}) {
+  const pages=data.pages||[], forms=data.forms||[], scripts=data.scripts||[], api=data.api_hints||[], params=data.parameters||[], cookies=data.cookies||[], tech=data.technologies||[];
+  $('surface-total').textContent=data.pages_crawled!=null?`${data.pages_crawled} pages mapped`:'Not mapped';
+  $('surface-summary').innerHTML=[['Pages',data.pages_crawled||0],['Forms',forms.length],['Scripts',scripts.length],['API hints',api.length],['Parameters',params.length],['Cookies',cookies.length]].map(([k,v])=>`<div class="surface-stat"><small>${esc(k)}</small><b>${v}</b></div>`).join('');
+  if(!data.pages_crawled){$('surface-details').innerHTML='<div class="empty">No web inventory for this run.</div>';return;}
+  const pageRows=pages.slice(0,20).map(p=>`<li><code>${esc(p.status_code??'?')}</code> <code>${esc(p.url)}</code>${p.forms?` · ${p.forms} form${p.forms===1?'':'s'}`:''}</li>`).join('');
+  const formRows=forms.slice(0,12).map(f=>`<li><code>${esc(f.method)}</code> <code>${esc(f.action)}</code>${f.has_password?' · password':''}${f.has_file_upload?' · file upload':''}</li>`).join('');
+  $('surface-details').innerHTML=`<details open><summary>Discovered routes</summary><ul>${pageRows||'<li>None</li>'}</ul></details>${forms.length?`<details><summary>Forms</summary><ul>${formRows}</ul></details>`:''}${api.length?`<details><summary>API / service hints</summary><ul>${api.slice(0,20).map(x=>`<li><code>${esc(x)}</code></li>`).join('')}</ul></details>`:''}${tech.length?`<details><summary>Technology signals</summary><ul>${tech.slice(0,20).map(x=>`<li><code>${esc(x)}</code></li>`).join('')}</ul></details>`:''}`;
+}
 function findings(list=[]) {
   $('run-count').textContent=list.length; $('finding-total').textContent=`${list.length} findings`;
   $('finding-list').innerHTML=list.length?list.map(f=>`<article class="finding"><b>${esc(f.title)}</b><div class="meta"><span class="badge">${esc(f.severity)}</span><span class="badge">${esc(f.id)}</span><span class="badge">${esc(f.cwe||'CWE unmapped')}</span><span class="badge">CVSS ${f.cvss_score??'pending'}</span><span class="badge">${Math.round((f.confidence||0)*100)}% confidence</span></div><p>${esc(f.description)}</p><details><summary>Evidence & remediation</summary>${(f.evidence||[]).map(e=>`<pre>${esc(e)}</pre>`).join('')}<p><b>Remediation:</b> ${esc(f.remediation)}</p><p><b>Source:</b> ${esc(f.source_tool||'dolossec')}</p></details></article>`).join(''):'<div class="empty">No findings.</div>';
@@ -84,7 +93,7 @@ function timeline(events=[]) {
 function renderRun(r) {
   S.run=r; $('run-id').textContent=r.run_id; $('run-target').textContent=r.target; $('run-mode').textContent=r.mode;
   $('run-ai').textContent=`${r.planner}${r.planner_model?' / '+r.planner_model:''}`;
-  $('status').textContent=r.status; findings(r.findings||[]); sev(r.severity_counts||{}); timeline(r.events||[]);
+  $('status').textContent=r.status; surface(r.surface||{}); findings(r.findings||[]); sev(r.severity_counts||{}); timeline(r.events||[]);
   $('report').textContent=r.report||r.error||'Report not ready.'; show('approve',r.status==='awaiting_approval');
   if(r.status==='completed') {show('downloads');$('dl-report').href=`/api/runs/${r.run_id}/download/report`;$('dl-json').href=`/api/runs/${r.run_id}/download/findings`;$('dl-audit').href=`/api/runs/${r.run_id}/download/audit`;$('dl-obs').href=`/api/runs/${r.run_id}/download/observations`;} else show('downloads',false);
 }

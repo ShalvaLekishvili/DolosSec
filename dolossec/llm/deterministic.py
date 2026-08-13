@@ -25,8 +25,14 @@ class DeterministicPlanner(Planner):
                 return PlannerTurn(summary=action.reason, actions=[action])
             return PlannerTurn(summary="Source review complete", actions=[Action(tool="finish", reason="No more deterministic local checks")])
 
-        if step == 0:
+        completed = {obs.tool for obs in observations if obs.ok}
+        if "web_inventory" in completed:
+            return PlannerTurn(
+                summary="Host-controlled web discovery complete",
+                actions=[Action(tool="finish", reason="Deterministic remote coverage completed by mandatory discovery phase")],
+            )
+        if "http_probe" not in completed:
             return PlannerTurn(summary="Probe target", actions=[Action(tool="http_probe", arguments={"url": target.value, "method": "GET"}, reason="Establish HTTP behavior")])
-        if step == 1:
+        if "security_headers" not in completed:
             return PlannerTurn(summary="Review response security headers", actions=[Action(tool="security_headers", arguments={"url": target.value}, reason="Check baseline browser security controls")])
-        return PlannerTurn(summary="Web baseline complete", actions=[Action(tool="finish", reason="No more deterministic remote checks")])
+        return PlannerTurn(summary="Map web attack surface", actions=[Action(tool="web_inventory", arguments={"url": target.value, "max_pages": 20, "max_depth": 2}, reason="Discover target-specific routes, forms, scripts, cookies, and API hints")])

@@ -9,7 +9,7 @@ from uuid import uuid4
 from ..audit import AuditLog
 from ..config import settings
 from ..llm.base import Planner
-from ..models import Observation, RunRecord, Target
+from ..models import Action, Observation, RunRecord, Target
 from ..policy import ScopePolicy
 from ..reporting import findings_from_observations, write_reports
 from ..tooling.registry import ToolBroker
@@ -20,7 +20,7 @@ ProgressSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 def _agent_for_tool(tool: str) -> str:
     if tool in {"source_map", "source_review", "bandit_scan", "semgrep_scan", "trivy_fs_scan"}:
         return "source-researcher"
-    if tool in {"http_probe", "security_headers"}:
+    if tool in {"http_probe", "security_headers", "web_inventory"}:
         return "web-researcher"
     if tool == "finish":
         return "orchestrator"
@@ -104,6 +104,70 @@ class Orchestrator:
         )
 
         observations: list[Observation] = []
+
+        # Remote assessments always perform a minimum host-controlled discovery phase.
+        # The AI planner cannot skip this coverage by immediately returning finish().
+        if self.target.kind.value == "url":
+            crawl_limits = {
+                "quick": {"max_pages": 8, "max_depth": 1},
+                "standard": {"max_pages": 25, "max_depth": 2},
+                "deep": {"max_pages": 60, "max_depth": 3},
+            }.get(self.mode, {"max_pages": 25, "max_depth": 2})
+            baseline_actions = [
+                Action(
+                    tool="http_probe",
+                    arguments={"url": self.target.value, "method": "GET"},
+                    reason="Establish target-specific HTTP baseline",
+                ),
+                Action(
+                    tool="security_headers",
+                    arguments={"url": self.target.value},
+                    reason="Evaluate baseline browser security controls",
+                ),
+                Action(
+                    tool="web_inventory",
+                    arguments={"url": self.target.value, **crawl_limits},
+                    reason="Build same-origin attack-surface inventory before AI reasoning",
+                ),
+            ]
+            for action in baseline_actions:
+                agent = _agent_for_tool(action.tool)
+                await self._emit(
+                    "tool_started",
+                    f"Running mandatory {action.tool}",
+                    {
+                        "tool": action.tool,
+                        "reason": action.reason,
+                        "arguments": action.arguments,
+                        "agent": agent,
+                        "mandatory": True,
+                    },
+                )
+                obs = await self.broker.execute(action)
+                observations.append(obs)
+                await self._emit(
+                    "tool_completed" if obs.ok else "tool_failed",
+                    f"{action.tool} {'completed' if obs.ok else 'failed'}",
+                    {
+                        "tool": action.tool,
+                        "ok": obs.ok,
+                        "error": obs.error,
+                        "data": obs.data,
+                        "agent": agent,
+                        "mandatory": True,
+                    },
+                )
+                partial_findings = findings_from_observations(observations, self.target.value)
+                await self._emit(
+                    "findings_updated",
+                    f"{len(partial_findings)} finding(s) identified so far",
+                    {
+                        "count": len(partial_findings),
+                        "findings": [f.model_dump(mode="json") for f in partial_findings],
+                        "agent": "reporter",
+                    },
+                )
+
         max_steps = {
             "quick": 3,
             "standard": settings.max_steps,
@@ -186,7 +250,6 @@ class Orchestrator:
                     f"Running approved adapter {tool_name}",
                     {"tool": tool_name, "reason": "Operator-selected adapter", "arguments": {"path": self.target.value}, "agent": "source-researcher"},
                 )
-                from ..models import Action
                 obs = await self.broker.execute(Action(tool=tool_name, arguments={"path": self.target.value}, reason="Operator-selected adapter"))
                 observations.append(obs)
                 await self._emit(

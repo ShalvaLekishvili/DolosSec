@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.4.0-4f86c6">
+  <img alt="Version" src="https://img.shields.io/badge/version-0.5.0-4f86c6">
   <img alt="Python" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white">
   <img alt="License" src="https://img.shields.io/badge/License-Apache--2.0-5b6673">
   <img alt="Ollama" src="https://img.shields.io/badge/Local_AI-Ollama-111111">
@@ -30,7 +30,7 @@ The project is built around one trust rule:
 
 The AI model is **not** the security boundary. A planner response cannot directly launch arbitrary shell commands or ignore scope. Proposed actions are parsed into typed models and must pass host-side policy before execution.
 
-DolosSec v0.4 performs real source analysis, policy-gated HTTP inspection, optional local security-tool execution, Ollama-backed planning, evidence normalization, scan history, analyst approval for Deep mode, and report generation.
+DolosSec v0.5 performs real source analysis, policy-gated HTTP inspection, optional local security-tool execution, Ollama-backed planning, evidence normalization, scan history, analyst approval for Deep mode, and report generation.
 
 > [!IMPORTANT]
 > DolosSec is intended only for systems, applications, labs, and source trees you are authorized to assess. It is not presented as a replacement for a full professional penetration test.
@@ -157,8 +157,8 @@ Clone the repository and create an environment:
 ### Linux / macOS
 
 ```bash
-git clone https://github.com/ShalvaLekishvili/DolosSec.git
-cd dolossec-agent
+git clone https://github.com/YOUR-USERNAME/dolossec-agent.git
+cd DolosSec
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -168,8 +168,8 @@ pip install -e '.[ai,dev]'
 ### Windows PowerShell
 
 ```powershell
-git clone https://github.com/ShalvaLekishvili/DolosSec.git
-cd dolossec-agent
+git clone https://github.com/YOUR-USERNAME/dolossec-agent.git
+cd DolosSec
 
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -182,7 +182,7 @@ pip install -e ".[ai,dev]"
 
 # Local AI with Ollama
 
-DolosSec v0.4 talks directly to the local Ollama API at:
+DolosSec v0.5 talks directly to the local Ollama API at:
 
 ```text
 http://127.0.0.1:11434
@@ -557,6 +557,16 @@ Current release baseline:
 ```text
 15 tests passing
 ```
+
+---
+
+## v0.5 web assessment engine
+
+Remote URL scans now perform a mandatory, host-controlled passive discovery phase before an AI planner can end the run. Different applications therefore produce different attack-surface inventories even when they share the same missing security headers.
+
+The web inventory records same-origin pages, forms, query parameter names, scripts, API/service hints, cookies, CORS signals, technology disclosures, robots.txt/sitemap.xml responses, and mixed-content references. It does **not** submit forms, brute-force paths, mutate application state, or send exploit payloads.
+
+The final report includes a **Web attack surface** section in addition to evidence-backed findings.
 
 ---
 

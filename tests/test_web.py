@@ -107,3 +107,80 @@ def test_history_and_capabilities_endpoints():
         ids = {x["id"] for x in capabilities.json()["adapters"]}
         assert {"bandit_scan", "semgrep_scan", "trivy_fs_scan", "nuclei"}.issubset(ids)
         assert capabilities.json()["deep_requires_approval"] is True
+
+
+def test_remote_web_scan_builds_target_specific_surface():
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            return
+
+        def do_HEAD(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+
+        def do_GET(self):
+            if self.path.startswith("/login"):
+                body = b"<html><title>Login</title><form method='post' action='/session'><input name='user'><input type='password' name='password'></form></html>"
+                code = 200
+            elif self.path == "/robots.txt":
+                body = b"User-agent: *\nDisallow: /private\n"
+                code = 200
+            elif self.path == "/sitemap.xml":
+                body = b"not found"
+                code = 404
+            else:
+                body = b"<html><title>Fixture Home</title><a href='/login?next=/account'>Login</a><a href='/api/docs'>API</a><script src='/static/app.js'></script></html>"
+                code = 200
+            self.send_response(code)
+            self.send_header("Content-Type", "text/html" if self.path != "/robots.txt" else "text/plain")
+            self.send_header("X-Powered-By", "FixtureFramework/1.0")
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        target = f"http://127.0.0.1:{port}/"
+        app = create_app()
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/runs",
+                json={
+                    "target_type": "url",
+                    "target": target,
+                    "mode": "quick",
+                    "planner_provider": "deterministic",
+                    "allow_private_networks": True,
+                    "authorization": {
+                        "owner": "test-owner",
+                        "ticket": "WEB-E2E",
+                        "purpose": "authorized local HTTP fixture",
+                        "expires_hours": 1,
+                    },
+                },
+            )
+            assert response.status_code == 202, response.text
+            run_id = response.json()["run_id"]
+            payload = None
+            for _ in range(100):
+                payload = client.get(f"/api/runs/{run_id}").json()
+                if payload["status"] in {"completed", "failed"}:
+                    break
+                time.sleep(0.05)
+            assert payload is not None
+            assert payload["status"] == "completed", payload.get("error")
+            assert payload["surface"]["pages_crawled"] >= 3
+            assert any("/login" in p.get("url", "") for p in payload["surface"]["pages"])
+            assert any(f.get("has_password") for f in payload["surface"]["forms"])
+            assert "next" in payload["surface"]["parameters"]
+            assert "## Web attack surface" in payload["report"]
+            assert "/login?next=/account" in payload["report"]
+    finally:
+        server.shutdown()
+        server.server_close()

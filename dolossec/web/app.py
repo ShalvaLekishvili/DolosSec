@@ -75,6 +75,7 @@ class RunState:
     current_stage: str = "Queued"
     findings_count: int = 0
     findings: list[dict[str, Any]] = field(default_factory=list)
+    surface: dict[str, Any] = field(default_factory=dict)
     report: str = ""
     error: str | None = None
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
@@ -109,6 +110,7 @@ class RunState:
             "findings_count": self.findings_count,
             "severity_counts": self.severity_counts(),
             "findings": self.findings,
+            "surface": self.surface,
             "report": self.report if include_report else "",
             "error": self.error,
             "created_at": self.created_at,
@@ -155,7 +157,7 @@ class RunManager:
                         run_id=raw["run_id"], target=raw["target"], target_type=raw["target_type"],
                         mode=raw.get("mode", "standard"), planner=raw.get("planner", "unknown"),
                         planner_model=raw.get("planner_model"), output_dir=run_dir, status=status, current_stage=raw.get("current_stage", status.title()),
-                        findings_count=raw.get("findings_count", 0), findings=raw.get("findings", []),
+                        findings_count=raw.get("findings_count", 0), findings=raw.get("findings", []), surface=raw.get("surface", {}),
                         error=raw.get("error"), created_at=raw.get("created_at", ""), started_at=raw.get("started_at"),
                         finished_at=raw.get("finished_at"), events=raw.get("events", []),
                         enabled_adapters=raw.get("enabled_adapters", []), approval_required=raw.get("approval_required", False),
@@ -181,6 +183,15 @@ class RunManager:
                     state.findings_count = len(state.findings)
                 if report_path.exists():
                     state.report = report_path.read_text(encoding="utf-8")
+                observations_path = run_dir / "observations.json"
+                if observations_path.exists() and not state.surface:
+                    try:
+                        observations = json.loads(observations_path.read_text(encoding="utf-8"))
+                        inv = next((o for o in observations if o.get("tool") == "web_inventory" and o.get("ok")), None)
+                        if inv:
+                            state.surface = inv.get("data") or {}
+                    except (ValueError, json.JSONDecodeError):
+                        pass
                 self.runs[state.run_id] = state
             except (OSError, ValueError, KeyError, json.JSONDecodeError):
                 continue
@@ -197,6 +208,8 @@ class RunManager:
         elif event_type == "findings_updated":
             state.findings = event.get("data", {}).get("findings", [])
             state.findings_count = len(state.findings)
+        elif event_type == "tool_completed" and event.get("data", {}).get("tool") == "web_inventory":
+            state.surface = event.get("data", {}).get("data") or {}
         elif event_type == "run_finished":
             state.status = "completed"
             state.finished_at = event.get("timestamp")

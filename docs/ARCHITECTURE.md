@@ -118,3 +118,8 @@ Authorized target + bounded evidence
 The default Ollama endpoint is loopback only. `DOLOS_OLLAMA_ALLOW_REMOTE=false` rejects non-loopback base URLs before any request is sent. This is intentional because the normal local Ollama API is not authenticated.
 
 Recent observations are recursively bounded before being included in AI context. Source code, HTTP output and tool results are explicitly labeled untrusted data in the model system policy. This reduces context growth and limits the amount of prompt-injection content forwarded to the planner, while the real security control remains the typed host policy.
+
+
+## Mandatory remote discovery (v0.5)
+
+For URL assessments, the orchestrator runs a minimum host-controlled phase before planner-controlled steps: HTTP baseline, security-header inspection, and passive same-origin `web_inventory`. Quick/Standard/Deep modes vary crawl page/depth limits. The planner may reason over these observations, but it cannot terminate the assessment before this minimum coverage completes. The inventory does not submit forms, brute-force paths, or send exploit payloads.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- Added mandatory same-origin passive web attack-surface discovery for URL assessments.
+- Added route, form, script, query-parameter, cookie, CORS, technology, API-hint, robots.txt and sitemap.xml inventory.
+- Added target-specific Web attack surface section to Markdown reports.
+- Added live web-console attack-surface panel.
+- Added conservative findings for observed cookie flags, password forms using GET, mixed content, directory listings, wildcard CORS and X-Powered-By disclosure.
+- Prevented deterministic and AI planners from skipping the minimum remote discovery phase.
+- Added passive web inventory regression tests.
+
 ## 0.4.0 — Local Ollama AI
 
 - Added a native Ollama REST client with no paid API dependency.

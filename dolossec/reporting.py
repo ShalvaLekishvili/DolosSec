@@ -74,6 +74,123 @@ def findings_from_observations(observations: Iterable[Observation], target: str)
                     source_tool=obs.tool,
                 ))
 
+        if obs.tool == "web_inventory" and obs.ok:
+            data = obs.data or {}
+
+            # Passive evidence from the site's real responses. These are deliberately
+            # conservative and do not claim exploitability without stronger validation.
+            for cookie in data.get("cookies", []):
+                name = str(cookie.get("name") or "cookie")
+                page = str(cookie.get("page") or target)
+                session_like = any(token in name.lower() for token in ("session", "sess", "auth", "token", "jwt", "sid"))
+                if page.startswith("https://") and not cookie.get("secure"):
+                    findings.append(Finding(
+                        id=_fid(f"{target}:cookie:{name}:secure"),
+                        title=f"Cookie missing Secure attribute: {name}",
+                        severity=Severity.medium if session_like else Severity.low,
+                        confidence=0.9,
+                        target=target,
+                        category="cookie_security",
+                        description="The observed Set-Cookie value did not include the Secure attribute on an HTTPS response.",
+                        evidence=[f"Cookie {name!r} observed on {page} without Secure."],
+                        remediation="Set Secure on cookies that should only be sent over HTTPS, especially authentication/session cookies.",
+                        cwe="CWE-614",
+                        source_tool=obs.tool,
+                    ))
+                if session_like and not cookie.get("httponly"):
+                    findings.append(Finding(
+                        id=_fid(f"{target}:cookie:{name}:httponly"),
+                        title=f"Session-like cookie missing HttpOnly: {name}",
+                        severity=Severity.medium,
+                        confidence=0.82,
+                        target=target,
+                        category="cookie_security",
+                        description="A session/authentication-like cookie was observed without HttpOnly.",
+                        evidence=[f"Cookie {name!r} observed on {page} without HttpOnly."],
+                        remediation="Set HttpOnly on session/authentication cookies unless client-side JavaScript access is explicitly required.",
+                        cwe="CWE-1004",
+                        source_tool=obs.tool,
+                    ))
+
+            for page in data.get("pages", []):
+                cors = page.get("cors") or {}
+                if cors.get("allow_origin") == "*":
+                    findings.append(Finding(
+                        id=_fid(f"{target}:cors:{page.get('url')}:wildcard"),
+                        title="Wildcard CORS policy observed",
+                        severity=Severity.low,
+                        confidence=0.95,
+                        target=target,
+                        category="cors",
+                        description="The response permits cross-origin reads from any origin. Whether this is risky depends on the sensitivity of the exposed resource.",
+                        evidence=[f"{page.get('url')}: Access-Control-Allow-Origin: *"],
+                        remediation="Restrict CORS to explicitly trusted origins for endpoints that expose non-public or user-specific data.",
+                        cwe="CWE-942",
+                        source_tool=obs.tool,
+                    ))
+                title = str(page.get("title") or "")
+                if title.lower().startswith("index of /"):
+                    findings.append(Finding(
+                        id=_fid(f"{target}:directory-listing:{page.get('url')}"),
+                        title="Directory listing appears enabled",
+                        severity=Severity.low,
+                        confidence=0.9,
+                        target=target,
+                        category="information_exposure",
+                        description="A crawled page appears to expose a directory index.",
+                        evidence=[f"{page.get('url')}: title={title!r}"],
+                        remediation="Disable directory indexing unless it is an intentional public feature.",
+                        cwe="CWE-548",
+                        source_tool=obs.tool,
+                    ))
+
+            for form in data.get("forms", []):
+                if form.get("has_password") and str(form.get("method") or "GET").upper() == "GET":
+                    findings.append(Finding(
+                        id=_fid(f"{target}:password-get:{form.get('page')}:{form.get('action')}"),
+                        title="Password form uses GET",
+                        severity=Severity.high,
+                        confidence=0.97,
+                        target=target,
+                        category="authentication_transport",
+                        description="A password field was observed in a form whose method is GET, which can place credentials in URLs and intermediary logs.",
+                        evidence=[f"Page {form.get('page')} → action {form.get('action')} uses GET and contains a password input."],
+                        remediation="Submit credentials using POST over HTTPS and ensure sensitive values are not placed in query strings.",
+                        cwe="CWE-598",
+                        source_tool=obs.tool,
+                    ))
+
+            for resource in data.get("mixed_content", []):
+                findings.append(Finding(
+                    id=_fid(f"{target}:mixed-content:{resource}"),
+                    title="Mixed-content resource referenced from HTTPS page",
+                    severity=Severity.medium,
+                    confidence=0.95,
+                    target=target,
+                    category="transport_security",
+                    description="An HTTPS page referenced a resource over plain HTTP.",
+                    evidence=[str(resource)],
+                    remediation="Serve all active and passive page resources over HTTPS and remove insecure HTTP references.",
+                    cwe="CWE-319",
+                    source_tool=obs.tool,
+                ))
+
+            for tech in data.get("technologies", []):
+                if str(tech).startswith("x-powered-by:"):
+                    findings.append(Finding(
+                        id=_fid(f"{target}:powered-by:{tech}"),
+                        title="Technology disclosure via X-Powered-By",
+                        severity=Severity.low,
+                        confidence=0.98,
+                        target=target,
+                        category="information_exposure",
+                        description="The application disclosed implementation technology in an HTTP response header.",
+                        evidence=[str(tech)],
+                        remediation="Remove unnecessary X-Powered-By headers where practical and keep the underlying platform patched.",
+                        cwe="CWE-200",
+                        source_tool=obs.tool,
+                    ))
+
         if obs.tool == "source_review" and obs.ok:
             mapping = {
                 "hardcoded_secret": (Severity.medium, "CWE-798"),
@@ -226,6 +343,46 @@ def write_reports(output_dir: Path, findings: list[Finding], observations: list[
         *[f"- {name.title()}: **{count}**" for name, count in severity_counts.items()],
         "",
     ]
+    web_inventory = next((o for o in observations if o.tool == "web_inventory" and o.ok), None)
+    if web_inventory is not None:
+        data = web_inventory.data or {}
+        pages = data.get("pages", [])
+        forms = data.get("forms", [])
+        scripts = data.get("scripts", [])
+        api_hints = data.get("api_hints", [])
+        parameters = data.get("parameters", [])
+        technologies = data.get("technologies", [])
+        lines.extend([
+            "## Web attack surface",
+            "",
+            f"- Pages crawled: **{data.get('pages_crawled', len(pages))}**",
+            f"- Forms discovered: **{len(forms)}**",
+            f"- Same-origin scripts: **{len(scripts)}**",
+            f"- API/GraphQL/OpenAPI hints: **{len(api_hints)}**",
+            f"- Query parameter names: **{len(parameters)}**",
+            f"- Cookies observed: **{len(data.get('cookies', []))}**",
+            "",
+        ])
+        if technologies:
+            lines.extend(["### Technology signals", *[f"- `{x}`" for x in technologies[:20]], ""])
+        if pages:
+            lines.extend(["### Crawled pages", *[f"- `{p.get('status_code', '?')}` `{p.get('url')}`" for p in pages[:30]], ""])
+        if forms:
+            lines.append("### Forms")
+            for form in forms[:20]:
+                flags = []
+                if form.get("has_password"):
+                    flags.append("password")
+                if form.get("has_file_upload"):
+                    flags.append("file-upload")
+                suffix = f" ({', '.join(flags)})" if flags else ""
+                lines.append(f"- `{form.get('method')}` `{form.get('action')}` from `{form.get('page')}`{suffix}")
+            lines.append("")
+        if api_hints:
+            lines.extend(["### API / service hints", *[f"- `{x}`" for x in api_hints[:30]], ""])
+        if parameters:
+            lines.extend(["### Observed parameter names", f"`{', '.join(parameters[:80])}`", ""])
+
     if not findings:
         lines.append("No findings were produced by the enabled checks. This does not prove the target is vulnerability-free.")
     for finding in findings:

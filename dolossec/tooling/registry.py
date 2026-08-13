@@ -5,7 +5,7 @@ from ..models import Action, Observation
 from ..policy import ScopePolicy
 from .base import Tool
 from .external import BanditTool, SemgrepTool, TrivyFsTool
-from .http import HttpProbeTool, SecurityHeadersTool
+from .http import HttpProbeTool, SecurityHeadersTool, WebInventoryTool
 from .source import SourceMapTool, SourceReviewTool
 
 
@@ -23,6 +23,7 @@ class ToolBroker:
         if policy:
             self.tools["http_probe"] = HttpProbeTool(policy)
             self.tools["security_headers"] = SecurityHeadersTool(policy)
+            self.tools["web_inventory"] = WebInventoryTool(policy)
 
     async def execute(self, action: Action) -> Observation:
         self.audit.append("tool_requested", action.model_dump())
